@@ -101,28 +101,3 @@ Backups are stored in `~/.config/repro/backups/` with hostname-timestamp format:
 
 ## License
 MIT © 2023 stefan-hacks
-
-### One-line Installation Command
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/yourusername/repro/main/install.sh)
-```
-
-## Key Components
-
-1. **README.md**:
-   - Comprehensive documentation with badges, features list, and usage examples
-   - Clear installation instructions and workflow explanation
-   - Backup structure visualization
-   - License information
-
-2. **Installation Script**:
-   - Downloads the latest `repro` script from GitHub
-   - Installs to `/usr/bin/repro`
-   - Creates necessary config directories
-   - Initializes package database
-   - Provides success message
-
-3. **One-line Install**:
-   - Simple copy-paste installation for users
-   - Handles all setup automatically
-
