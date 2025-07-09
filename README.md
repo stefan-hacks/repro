@@ -24,7 +24,7 @@
 ## Installation
 
 ```bash
-bash <(curl -sL https://github.com/stefan-hacks/repro/blob/main/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/stefan-hacks/repro/refs/heads/main/install.sh)
 ```
 
 ## Usage

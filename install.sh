@@ -4,7 +4,7 @@ set -e
 
 # Download and install repro
 echo "Installing repro..."
-sudo curl -L https://github.com/stefan-hacks/repro/blob/main/repro.sh -o /usr/bin/repro
+sudo curl -L https://raw.githubusercontent.com/stefan-hacks/repro/refs/heads/main/repro.sh -o /usr/bin/repro
 sudo chmod +x /usr/bin/repro
 
 # Create config directory
