@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 
 # repro - Reproducible Environment Manager
-# Version 2.0.1
+# Version 3.0.0
 # Supports apt, brew, cargo, flatpak, snap
 # Automatic package tracking and system reproducibility
 
 # Configuration
-CONFIG_DIR="$HOME/.config/repro"
+CONFIG_DIR="${REPRO_CONFIG:-$HOME/.config/repro}"
 STATE_DIR="$CONFIG_DIR/state"
 BACKUP_DIR="$CONFIG_DIR/backups"
 LOG_FILE="$CONFIG_DIR/repro.log"
 COLOR_ENABLED=true
 HOSTNAME=$(hostname | tr '[:upper:]' '[:lower:]')
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
+NONINTERACTIVE=false
 
 # Initialize colors
 setup_colors() {
@@ -24,38 +25,32 @@ setup_colors() {
         MAGENTA=$(tput setaf 5)
         CYAN=$(tput setaf 6)
         BOLD=$(tput bold)
+        DIM=$(tput dim)
         RESET=$(tput sgr0)
     else
-        RED=""
-        GREEN=""
-        YELLOW=""
-        BLUE=""
-        MAGENTA=""
-        CYAN=""
-        BOLD=""
-        RESET=""
+        RED=""; GREEN=""; YELLOW=""; BLUE=""
+        MAGENTA=""; CYAN=""; BOLD=""; RESET=""; DIM=""
     fi
 }
 
-# Logging functions
+# Enhanced logging
 log() {
-    echo -e "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
-}
-
-success() {
-    log "${GREEN}✓ SUCCESS:${RESET} $*"
-}
-
-info() {
-    log "${CYAN}ℹ INFO:${RESET} $*"
-}
-
-warn() {
-    log "${YELLOW}⚠ WARNING:${RESET} $*"
-}
-
-error() {
-    log "${RED}✗ ERROR:${RESET} $*"
+    local type="$1"
+    local msg="$2"
+    local color=""
+    local symbol=""
+    
+    case $type in
+        success) color="$GREEN"; symbol="✓" ;;
+        info) color="$CYAN"; symbol="ℹ" ;;
+        warn) color="$YELLOW"; symbol="⚠" ;;
+        error) color="$RED"; symbol="✗" ;;
+        *) color="$BLUE"; symbol="•" ;;
+    esac
+    
+    local log_entry="$(date '+%Y-%m-%d %H:%M:%S') - ${type^^}: $msg"
+    echo -e "${color}${BOLD}${symbol} ${type^^}:${RESET} $msg" >&2
+    echo "$log_entry" >> "$LOG_FILE"
 }
 
 # Initialize directories
@@ -75,99 +70,81 @@ detect_apt() {
 }
 
 detect_brew() {
-    if command -v brew &> /dev/null; then
-        brew leaves | sort -u > "$STATE_DIR/brew.txt"
-    fi
+    command -v brew &>/dev/null && brew leaves | sort -u > "$STATE_DIR/brew.txt"
 }
 
 detect_cargo() {
-    if command -v cargo &> /dev/null; then
-        cargo install --list | grep -E '^[a-zA-Z0-9_-]+ v[0-9]' | cut -d' ' -f1 | sort -u > "$STATE_DIR/cargo.txt"
-    fi
+    command -v cargo &>/dev/null && cargo install --list | awk '/^[a-z0-9_-]+ v[0-9]/{print $1}' | sort -u > "$STATE_DIR/cargo.txt"
 }
 
 detect_flatpak() {
-    if command -v flatpak &> /dev/null; then
-        flatpak list --app --columns=application | sort -u > "$STATE_DIR/flatpak.txt"
-    fi
+    command -v flatpak &>/dev/null && flatpak list --app --columns=application | sort -u > "$STATE_DIR/flatpak.txt"
 }
 
 detect_snap() {
-    if command -v snap &> /dev/null; then
-        snap list | awk 'NR>1 {print $1}' | sort -u > "$STATE_DIR/snap.txt"
-    fi
+    command -v snap &>/dev/null && snap list | awk 'NR>1 {print $1}' | sort -u > "$STATE_DIR/snap.txt"
 }
 
 detect_gnome() {
-    if command -v dconf &> /dev/null; then
-        dconf dump / > "$STATE_DIR/gnome.txt"
-    fi
+    command -v dconf &>/dev/null && dconf dump / > "$STATE_DIR/gnome.txt"
 }
 
 detect_all() {
-    info "Detecting installed packages and settings..."
-    detect_apt
-    detect_brew
-    detect_cargo
-    detect_flatpak
-    detect_snap
-    detect_gnome
-    success "Detection completed"
+    log info "Detecting installed packages and settings..."
+    detect_apt; detect_brew; detect_cargo
+    detect_flatpak; detect_snap; detect_gnome
+    log success "Detection completed"
 }
 
 # Installation functions
 install_apt() {
-    if [ -s "$STATE_DIR/apt.txt" ]; then
-        info "Installing APT packages..."
-        sudo apt update
-        xargs -a "$STATE_DIR/apt.txt" sudo apt install -y
+    if [[ -s "$STATE_DIR/apt.txt" ]]; then
+        log info "Installing APT packages..."
+        sudo apt-get update
+        xargs -a "$STATE_DIR/apt.txt" sudo apt-get install -y
     fi
 }
 
 install_brew() {
-    if [ -s "$STATE_DIR/brew.txt" ] && command -v brew &> /dev/null; then
-        info "Installing Homebrew packages..."
+    [[ -s "$STATE_DIR/brew.txt" ]] && command -v brew &>/dev/null && {
+        log info "Installing Homebrew packages..."
         xargs -a "$STATE_DIR/brew.txt" brew install
-    fi
+    }
 }
 
 install_cargo() {
-    if [ -s "$STATE_DIR/cargo.txt" ] && command -v cargo &> /dev/null; then
-        info "Installing Cargo packages..."
+    [[ -s "$STATE_DIR/cargo.txt" ]] && command -v cargo &>/dev/null && {
+        log info "Installing Cargo packages..."
         xargs -a "$STATE_DIR/cargo.txt" cargo install
-    fi
+    }
 }
 
 install_flatpak() {
-    if [ -s "$STATE_DIR/flatpak.txt" ] && command -v flatpak &> /dev/null; then
-        info "Installing Flatpak packages..."
+    [[ -s "$STATE_DIR/flatpak.txt" ]] && command -v flatpak &>/dev/null && {
+        log info "Installing Flatpak packages..."
         xargs -a "$STATE_DIR/flatpak.txt" flatpak install -y
-    fi
+    }
 }
 
 install_snap() {
-    if [ -s "$STATE_DIR/snap.txt" ] && command -v snap &> /dev/null; then
-        info "Installing Snap packages..."
+    [[ -s "$STATE_DIR/snap.txt" ]] && command -v snap &>/dev/null && {
+        log info "Installing Snap packages..."
         xargs -a "$STATE_DIR/snap.txt" -I{} sudo snap install {}
-    fi
+    }
 }
 
 install_gnome() {
-    if [ -s "$STATE_DIR/gnome.txt" ] && command -v dconf &> /dev/null; then
-        info "Applying GNOME settings..."
+    [[ -s "$STATE_DIR/gnome.txt" ]] && command -v dconf &>/dev/null && {
+        log info "Applying GNOME settings..."
         dconf load / < "$STATE_DIR/gnome.txt"
-    fi
+    }
 }
 
 install_all() {
-    info "Beginning system provisioning..."
-    install_apt
-    install_brew
-    install_cargo
-    install_flatpak
-    install_snap
-    install_gnome
-    success "Provisioning completed"
+    log info "Beginning system provisioning..."
+    install_apt; install_brew; install_cargo
+    install_flatpak; install_snap; install_gnome
+    log success "Provisioning completed"
 }
 
 # Backup functions
@@ -176,16 +153,16 @@ create_backup() {
     local backup_path="$BACKUP_DIR/$backup_name"
     
     mkdir -p "$backup_path"
-    cp "$STATE_DIR"/*.txt "$backup_path"
-    success "Backup created: $backup_name"
-    echo "Backup location: $backup_path"
+    cp -p "$STATE_DIR"/*.txt "$backup_path" 2>/dev/null
+    log success "Backup created: $backup_name"
+    echo "${BOLD}Backup location:${RESET} $backup_path"
 }
 
 list_backups() {
-    info "Available backups:"
+    log info "Available backups:"
     local count=1
-    ls -1 "$BACKUP_DIR" | while read -r backup; do
-        echo "  [$count] $backup"
+    ls -1t "$BACKUP_DIR" | while read -r backup; do
+        echo "  ${BOLD}[$count]${RESET} $backup"
         ((count++))
     done
 }
@@ -194,121 +171,142 @@ restore_backup() {
     local backup_id=$1
     local backup_path=""
     
+    # Numeric ID selection
     if [[ "$backup_id" =~ ^[0-9]+$ ]]; then
-        # Numeric ID selection
-        backup_path=$(ls -1 "$BACKUP_DIR" | sed -n "${backup_id}p")
-        if [ -z "$backup_path" ]; then
-            error "Invalid backup number: $backup_id"
+        backup_path=$(ls -1t "$BACKUP_DIR" | sed -n "${backup_id}p")
+        [[ -z "$backup_path" ]] && {
+            log error "Invalid backup number: $backup_id"
             return 1
-        fi
+        }
         backup_path="$BACKUP_DIR/$backup_path"
     else
-        # Direct name match
         backup_path="$BACKUP_DIR/$backup_id"
     fi
     
-    if [ ! -d "$backup_path" ]; then
-        error "Backup not found: $backup_id"
+    [[ ! -d "$backup_path" ]] && {
+        log error "Backup not found: $backup_id"
         return 1
-    fi
+    }
     
-    info "Restoring backup: $(basename "$backup_path")"
-    cp "$backup_path"/*.txt "$STATE_DIR"
-    success "Backup restored"
+    log info "Restoring backup: $(basename "$backup_path")"
+    cp -f "$backup_path"/*.txt "$STATE_DIR"
+    log success "Backup restored"
 }
 
-# Search functions
+# Package installation from specific manager
+install_package() {
+    local manager="$1"
+    local pkg="$2"
+    
+    case "$manager" in
+        apt)
+            sudo apt-get install -y "$pkg"
+            detect_apt
+            ;;
+        brew)
+            brew install "$pkg"
+            detect_brew
+            ;;
+        cargo)
+            cargo install "$pkg"
+            detect_cargo
+            ;;
+        flatpak)
+            flatpak install -y "$pkg"
+            detect_flatpak
+            ;;
+        snap)
+            sudo snap install "$pkg"
+            detect_snap
+            ;;
+        *)
+            log error "Unsupported manager: $manager"
+            return 1
+            ;;
+    esac
+}
+
+# Enhanced search function
 search_package() {
-    local pkg=$1
+    local pkg="$1"
+    local found=false
+    
     echo -e "${BOLD}${YELLOW}Search results for: $pkg${RESET}"
-    echo "--------------------------------"
+    echo "${BOLD}--------------------------------${RESET}"
     
     # APT
     if apt-cache show "$pkg" &>/dev/null; then
-        if dpkg -s "$pkg" &>/dev/null; then
-            version=$(dpkg -s "$pkg" | grep '^Version:' | awk '{print $2}')
-            echo -e "${GREEN}APT:${RESET} $pkg (${CYAN}$version${RESET})"
+        local installed_version=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null)
+        if [[ -n "$installed_version" ]]; then
+            echo -e "${GREEN}APT:${RESET} $pkg ${CYAN}($installed_version)${RESET} [Installed]"
         else
-            version=$(apt-cache show "$pkg" | grep -m1 '^Version:' | awk '{print $2}')
-            echo -e "${YELLOW}APT:${RESET} $pkg (${version}) ${RED}[Not Installed]${RESET}"
+            local available_version=$(apt-cache policy "$pkg" | grep -m1 'Candidate:' | awk '{print $2}')
+            echo -e "${YELLOW}APT:${RESET} $pkg ${CYAN}($available_version)${RESET} [Available]"
         fi
-    else
-        echo -e "${RED}APT:${RESET} $pkg [Not Found]"
+        found=true
     fi
     
     # Homebrew
     if command -v brew &>/dev/null; then
         if brew info "$pkg" &>/dev/null; then
-            version=$(brew info "$pkg" 2>/dev/null | grep -E '^[^/]+/brew' | awk '{print $3}')
+            local brew_version=$(brew info "$pkg" | head -1 | awk '{print $3}' | tr -d ',')
             if brew list | grep -q "^$pkg\$"; then
-                echo -e "${GREEN}Homebrew:${RESET} $pkg (${CYAN}$version${RESET})"
+                echo -e "${GREEN}Homebrew:${RESET} $pkg ${CYAN}($brew_version)${RESET} [Installed]"
             else
-                echo -e "${YELLOW}Homebrew:${RESET} $pkg (${version}) ${RED}[Not Installed]${RESET}"
+                echo -e "${YELLOW}Homebrew:${RESET} $pkg ${CYAN}($brew_version)${RESET} [Available]"
             fi
-        else
-            echo -e "${RED}Homebrew:${RESET} $pkg [Not Found]"
+            found=true
         fi
-    else
-        echo -e "${RED}Homebrew:${RESET} brew not installed"
     fi
-    
-    # Cargo (fixed to suppress informational messages)
+
+    # Cargo
     if command -v cargo &>/dev/null; then
-        # Use --quiet flag to suppress informational messages
         if cargo search --quiet --limit 1 "$pkg" 2>/dev/null | grep -q "^$pkg = "; then
-            version=$(cargo search --quiet --limit 1 "$pkg" 2>/dev/null | awk -F'"' '{print $2}')
-            if cargo install --list 2>/dev/null | grep -q "^$pkg v"; then
-                installed_version=$(cargo install --list 2>/dev/null | grep "^$pkg v" | head -1 | awk '{print $2}')
-                echo -e "${GREEN}Cargo:${RESET} $pkg (${CYAN}$installed_version${RESET})"
+            local cargo_version=$(cargo search --quiet --limit 1 "$pkg" | awk -F'"' '{print $2}')
+            if cargo install --list | grep -q "^$pkg v"; then
+                echo -e "${GREEN}Cargo:${RESET} $pkg ${CYAN}($cargo_version)${RESET} [Installed]"
             else
-                echo -e "${YELLOW}Cargo:${RESET} $pkg (${version}) ${RED}[Not Installed]${RESET}"
+                echo -e "${YELLOW}Cargo:${RESET} $pkg ${CYAN}($cargo_version)${RESET} [Available]"
             fi
-        else
-            echo -e "${RED}Cargo:${RESET} $pkg [Not Found]"
+            found=true
         fi
-    else
-        echo -e "${RED}Cargo:${RESET} cargo not installed"
     fi
-    
+
     # Flatpak
     if command -v flatpak &>/dev/null; then
         if flatpak search "$pkg" --columns=application 2>/dev/null | grep -q "$pkg"; then
-            if flatpak info "$pkg" &>/dev/null; then
-                version=$(flatpak info "$pkg" | grep -E '^Version:' | awk '{print $2}')
-                echo -e "${GREEN}Flatpak:${RESET} $pkg (${CYAN}$version${RESET})"
+            local flatpak_version=$(flatpak info "$pkg" 2>/dev/null | awk -F': ' '/^Version:/ {print $2}')
+            if flatpak list | grep -q "$pkg"; then
+                echo -e "${GREEN}Flatpak:${RESET} $pkg ${CYAN}($flatpak_version)${RESET} [Installed]"
             else
-                echo -e "${YELLOW}Flatpak:${RESET} $pkg ${RED}[Not Installed]${RESET}"
+                echo -e "${YELLOW}Flatpak:${RESET} $pkg ${CYAN}($flatpak_version)${RESET} [Available]"
             fi
-        else
-            echo -e "${RED}Flatpak:${RESET} $pkg [Not Found]"
+            found=true
         fi
-    else
-        echo -e "${RED}Flatpak:${RESET} flatpak not installed"
     fi
-    
+
     # Snap
     if command -v snap &>/dev/null; then
         if snap info "$pkg" &>/dev/null; then
-            version=$(snap info "$pkg" | awk '/^latest/{print $2; exit}')
+            local snap_version=$(snap info "$pkg" | awk '/^latest/ {print $2}')
             if snap list "$pkg" &>/dev/null; then
-                installed_ver=$(snap list "$pkg" | awk -v p="$pkg" '$1 == p {print $2}')
-                echo -e "${GREEN}Snap:${RESET} $pkg (${CYAN}$installed_ver${RESET})"
+                echo -e "${GREEN}Snap:${RESET} $pkg ${CYAN}($snap_version)${RESET} [Installed]"
             else
-                echo -e "${YELLOW}Snap:${RESET} $pkg (${version}) ${RED}[Not Installed]${RESET}"
+                echo -e "${YELLOW}Snap:${RESET} $pkg ${CYAN}($snap_version)${RESET} [Available]"
             fi
-        else
-            echo -e "${RED}Snap:${RESET} $pkg [Not Found]"
+            found=true
         fi
-    else
-        echo -e "${RED}Snap:${RESET} snap not installed"
     fi
+
+    [[ "$found" == false ]] && 
+        echo -e "${RED}No package found in any manager:${RESET} $pkg"
     
-    echo "--------------------------------"
+    echo "${BOLD}--------------------------------${RESET}"
 }
 
 # Monitoring setup
 setup_monitoring() {
-    info "Setting up package monitoring..."
+    log info "Setting up package monitoring..."
     
     # Create systemd service
     local service_file="/etc/systemd/system/repro-monitor.service"
@@ -318,10 +316,9 @@ setup_monitoring() {
     # Create monitoring script
     sudo tee "$script_path" > /dev/null <<'EOF'
 #!/bin/bash
-CONFIG_DIR="$HOME/.config/repro"
 export DISPLAY=:0
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
-/usr/local/bin/repro -d
+/usr/local/bin/repro --detect
 EOF
     sudo chmod +x "$script_path"
     
@@ -333,8 +330,6 @@ Description=Repro Package Monitor
 [Service]
 Type=oneshot
 User=$USER
-Environment="DISPLAY=:0"
-Environment="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus"
 ExecStart=$script_path
 EOF
 
@@ -351,55 +346,102 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-    # Enable and start
     sudo systemctl daemon-reload
     sudo systemctl enable repro-monitor.timer
     sudo systemctl start repro-monitor.timer
     
-    success "Monitoring enabled (runs hourly)"
+    log success "Monitoring enabled (runs hourly)"
 }
 
-# List functions
-list_packages() {
-    info "Current package state:"
+# Clean old backups
+clean_backups() {
+    local keep=${1:-5}
+    local total=$(ls -1t "$BACKUP_DIR" | wc -l)
     
-    for manager in apt brew cargo flatpak snap; do
-        local state_file="$STATE_DIR/$manager.txt"
+    if (( total <= keep )); then
+        log info "No backups to clean (keeping all $total backups)"
+        return
+    fi
+    
+    local to_remove=$((total - keep))
+    log info "Removing $to_remove old backups (keeping $keep)"
+    
+    ls -1t "$BACKUP_DIR" | tail -n $to_remove | while read -r backup; do
+        log info "Removing backup: $backup"
+        rm -rf "$BACKUP_DIR/$backup"
+    done
+    
+    log success "Backup cleanup completed"
+}
+
+# Show diff between states
+show_diff() {
+    local backup_id="$1"
+    local backup_path=""
+    
+    if [[ -z "$backup_id" ]]; then
+        backup_path=$(ls -dt "$BACKUP_DIR"/*/ | head -1)
+    elif [[ "$backup_id" =~ ^[0-9]+$ ]]; then
+        backup_path=$(ls -1t "$BACKUP_DIR" | sed -n "${backup_id}p")
+        [[ -z "$backup_path" ]] && {
+            log error "Invalid backup number: $backup_id"
+            return 1
+        }
+        backup_path="$BACKUP_DIR/$backup_path"
+    else
+        backup_path="$BACKUP_DIR/$backup_id"
+    fi
+    
+    [[ ! -d "$backup_path" ]] && {
+        log error "Backup not found: $backup_id"
+        return 1
+    }
+    
+    log info "Comparing current state with: $(basename "$backup_path")"
+    
+    for manager in apt brew cargo flatpak snap gnome; do
+        local current="$STATE_DIR/$manager.txt"
+        local backup="$backup_path/$manager.txt"
         
-        if [ -s "$state_file" ]; then
-            echo -e "${BOLD}${MAGENTA}${manager^^} PACKAGES:${RESET}"
-            cat "$state_file"
-            echo
-        fi
+        [[ ! -f "$backup" ]] && continue
+        
+        echo -e "\n${BOLD}${MAGENTA}${manager^^} CHANGES:${RESET}"
+        diff --color=always -U0 "$backup" "$current" | grep -v '^@@'
     done
 }
 
-# Help function
+# Enhanced help with Nala-like styling
 show_help() {
-    echo -e "${BOLD}${GREEN}repro - Reproducible Environment Manager${RESET}"
-    echo "Version 2.0.1 | Debian Package Management"
+    echo -e "${BOLD}${GREEN}repro - Reproducible Environment Manager${RESET} ${DIM}v3.0.0${RESET}"
+    echo "Cross-platform package management and system reproducibility"
     echo
-    echo "Usage: repro [OPTION] [ARGUMENTS]"
+    echo -e "${BOLD}${MAGENTA}USAGE:${RESET}"
+    echo "  repro [OPTIONS] [ARGUMENTS]"
     echo
-    echo "Options:"
-    echo "  -d, --detect        Detect installed packages (update state)"
-    echo "  -i, --install       Install packages from current state"
-    echo "  -b, --backup        Create new backup"
-    echo "  -r, --restore ID    Restore specific backup (by name or number)"
-    echo "  -l, --list          List current package state"
-    echo "  -s, --search PKG    Search for package across all managers"
-    echo "  -m, --monitor       Enable automatic package monitoring"
-    echo "  --list-backups      List available backups"
-    echo "  -v, --version       Show version information"
-    echo "  -h, --help          Show this help message"
+    echo -e "${BOLD}${MAGENTA}OPTIONS:${RESET}"
+    echo -e "  ${GREEN}-d, --detect${RESET}        Detect installed packages"
+    echo -e "  ${GREEN}-i, --install${RESET}       Install packages from current state"
+    echo -e "  ${GREEN}-a, --add PKG${RESET}       Install package and update state"
+    echo -e "  ${GREEN}-b, --backup${RESET}        Create new backup"
+    echo -e "  ${GREEN}-r, --restore ID${RESET}    Restore specific backup"
+    echo -e "  ${GREEN}-l, --list${RESET}          List current package state"
+    echo -e "  ${GREEN}-s, --search PKG${RESET}    Search for package across managers"
+    echo -e "  ${GREEN}-m, --monitor${RESET}       Enable automatic monitoring"
+    echo -e "  ${GREEN}--list-backups${RESET}      List available backups"
+    echo -e "  ${GREEN}--clean-backups [N]${RESET} Clean old backups (keep last N)"
+    echo -e "  ${GREEN}--diff [ID]${RESET}         Compare current state with backup"
+    echo -e "  ${GREEN}-v, --version${RESET}       Show version"
+    echo -e "  ${GREEN}-h, --help${RESET}          Show this help"
     echo
-    echo "Examples:"
-    echo "  repro -d              # Update package state"
-    echo "  repro -b              # Create new backup"
-    echo "  repro -r mypc_20250101120000  # Restore specific backup"
-    echo "  repro -r 2            # Restore backup #2 from list"
-    echo "  repro -s firefox      # Search for firefox package"
-    echo
+    echo -e "${BOLD}${MAGENTA}EXAMPLES:${RESET}"
+    echo -e "  ${DIM}# Create new backup${RESET}"
+    echo -e "  repro -b\n"
+    echo -e "  ${DIM}# Install package from specific manager${RESET}"
+    echo -e "  repro --add apt:neovim\n"
+    echo -e "  ${DIM}# Restore backup #2${RESET}"
+    echo -e "  repro -r 2\n"
+    echo -e "  ${DIM}# Compare with latest backup${RESET}"
+    echo -e "  repro --diff\n"
 }
 
 # Main function
@@ -407,10 +449,7 @@ main() {
     setup_colors
     init_dirs
     
-    if [[ $# -eq 0 ]]; then
-        show_help
-        exit 0
-    fi
+    [[ $# -eq 0 ]] && { show_help; exit 0; }
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -422,6 +461,19 @@ main() {
                 install_all
                 shift
                 ;;
+            -a|--add)
+                if [[ "$2" == *:* ]]; then
+                    manager="${2%%:*}"
+                    pkg="${2#*:}"
+                    shift
+                    log info "Installing $pkg via $manager"
+                    install_package "$manager" "$pkg"
+                else
+                    log error "Specify manager: package (e.g., apt:neovim)"
+                    exit 1
+                fi
+                shift
+                ;;
             -b|--backup)
                 create_backup
                 shift
@@ -431,7 +483,13 @@ main() {
                 shift 2
                 ;;
             -l|--list)
-                list_packages
+                log info "Current package state:"
+                for manager in apt brew cargo flatpak snap; do
+                    [[ -s "$STATE_DIR/$manager.txt" ]] && {
+                        echo -e "\n${BOLD}${MAGENTA}${manager^^} PACKAGES:${RESET}"
+                        cat "$STATE_DIR/$manager.txt"
+                    }
+                done
                 shift
                 ;;
             -s|--search)
@@ -446,8 +504,18 @@ main() {
                 list_backups
                 shift
                 ;;
+            --clean-backups)
+                clean_backups "$2"
+                [[ -n "$2" && "$2" =~ ^[0-9]+$ ]] && shift
+                shift
+                ;;
+            --diff)
+                show_diff "$2"
+                [[ -n "$2" ]] && shift
+                shift
+                ;;
             -v|--version)
-                echo "repro 2.0.1"
+                echo "repro 3.0.0"
                 exit 0
                 ;;
             -h|--help)
@@ -455,7 +523,7 @@ main() {
                 exit 0
                 ;;
             *)
-                error "Unknown option: $1"
+                log error "Unknown option: $1"
                 show_help
                 exit 1
                 ;;
