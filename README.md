@@ -36,6 +36,7 @@ Options:
   -d, --detect        Detect installed packages (update state)
   -i, --install       Install packages from current state
   -b, --backup        Create new backup
+  -a, --add PKG       Install package and update state
   -r, --restore ID    Restore specific backup (by name or number)
   -l, --list          List current package state
   -s, --search PKG    Search for package across all managers
@@ -45,6 +46,7 @@ Options:
   -h, --help          Show this help message
 
 Examples:
+  repro --add apt:neovim  # Install package from specific manager
   repro -d              # Update package state
   repro -b              # Create new backup
   repro -r mypc_20250101120000  # Restore specific backup
